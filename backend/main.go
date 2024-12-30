@@ -78,15 +78,33 @@ func handleWebSocket(conn *websocket.Conn) {
 			break
 		}
 
-		log.Printf("Received WebSocket message: %s", string(msg))
+		// Parse the received message
+		var message map[string]interface{}
+		if err := json.Unmarshal(msg, &message); err != nil {
+			log.Println("Error unmarshalling WebSocket message:", err)
+			continue
+		}
 
-		// Example: Forward the message to MediaSoup Node.js server or process it
-		// Forward logic can be added here
+		log.Printf("Received WebSocket message: %v", message)
 
-		// Echo back the message (for testing)
+		// Handle signaling messages
+		switch message["type"] {
+		case "offer":
+			log.Println("Handling SDP offer...")
+			// Forward to MediaSoup server or process locally
+		case "answer":
+			log.Println("Handling SDP answer...")
+		case "candidate":
+			log.Println("Handling ICE candidate...")
+		default:
+			log.Println("Unknown message type")
+		}
+
+		// Testing delete later
 		if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
 			log.Println("Error writing WebSocket message:", err)
 			break
 		}
 	}
 }
+
