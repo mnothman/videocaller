@@ -68,7 +68,6 @@ func fetchRtpCapabilities() (map[string]interface{}, error) {
 	return rtpCapabilities, nil
 }
 
-// Handle WebSocket connection for signaling
 func handleWebSocket(conn *websocket.Conn) {
 	for {
 		// Read messages from client

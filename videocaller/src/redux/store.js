@@ -1,8 +1,12 @@
 import { configureStore } from '@reduxjs/toolkit';
+import chatReducer from "../slices/chatSlice";
+import webrtcReducer from "../slices/webrtcSlice";
+
 
 const store = configureStore({
   reducer: {
-    // Add reducers 
+    webrtc: webrtcReducer,
+    chat: chatReducer,
   },
 });
 
