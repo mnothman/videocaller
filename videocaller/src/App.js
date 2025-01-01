@@ -3,16 +3,16 @@ import React, { useEffect, useState, useRef } from "react";
 import webSocketService from "./utils/WebSocketService";
 import Chat from "./components/Chat";
 import { useDispatch } from 'react-redux';
-import { addMessage } from '../slices/chatSlice'; // Adjust path if necessary
+import { addMessage } from './slices/chatSlice';
 
 function App() {
   const [messages, setMessages] = useState([]);
   const [localStream, setLocalStream] = useState(null);
   const [remoteStream, setRemoteStream] = useState(null);
+  const peerConnections = useRef({});
 
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
-  const peerConnection = useRef(null);
   const dispatch = useDispatch();
 
   useEffect(() => {
@@ -22,29 +22,25 @@ function App() {
 
     const connectWebSocket = async () => {
       try {
-        await webSocketService.connect("ws://localhost:8080/ws"); // Replace with your backend WebSocket URL
+        await webSocketService.connect("ws://localhost:8080/ws"); 
         console.log("Connected to WebSocket");
 
         webSocketService.onMessage((data) => {
-          console.log("Message received:", data);
-          setMessages((prevMessages) => [...prevMessages, data]);
-
-          // Handle different message types for WebRTC signaling
-          if (data.type === "chat") {
-            dispatch(addMessage(data.message)); // Add chat message to Redux store
-          }
-          else if (data.type === "offer") {
-            handleOffer(data.offer);
-          } else if (data.type === "answer") {
-            handleAnswer(data.answer);
-          } else if (data.type === "candidate") {
-            handleCandidate(data.candidate);
+          const { type, offer, answer, candidate, sender } = data;
+        
+          if (type === "offer") {
+            handleOffer(offer, sender);
+          } else if (type === "answer") {
+            handleAnswer(answer, sender);
+          } else if (type === "candidate") {
+            handleCandidate(candidate, sender);
           }
         });
       } catch (error) {
-        console.error("Failed to connect to WebSocket", error);
+        console.error("Error connecting to WebSocket:", error);
       }
-    };
+    }
+        
 
     const getMedia = async () => {
       try {
@@ -58,49 +54,59 @@ function App() {
       }
     };
 
-    const setupPeerConnection = () => {
-     peerConnection.current = new RTCPeerConnection({
-      iceServers: [{ urls: "stun:stun.l.google.com:19302" }], // Use a public STUN server for now
+    const setupPeerConnection = (userId) => {
+     const pc = new RTCPeerConnection({
+      iceServers: [{ urls: "stun:stun.l.google.com:19302" }], // Use public STUN server for now
     });
     
-    peerConnection.current.onicecandidate = (event) => {
+    pc.onicecandidate = (event) => {
       if (event.candidate) {
         webSocketService.sendMessage({
           type: "candidate",
           candidate: event.candidate,
+          target: userId,
         });
       }
     };
 
-    peerConnection.current.ontrack = (event) => {
-      const stream = new MediaStream();
-      stream.addTrack(event.track);
-      setRemoteStream(stream);
+    pc.ontrack = (event) => {
+      const [remoteStream] = event.streams;
+      setRemoteStream(remoteStream); 
       if (remoteVideoRef.current) {
-        remoteVideoRef.current.srcObject = stream;
+        remoteVideoRef.current.srcObject = remoteStream;
       }
     };
     
     if (localStream) {
       localStream.getTracks().forEach((track) => {
-        peerConnection.current.addTrack(track, localStream);
+        pc.current.addTrack(track, localStream);
       });
+    }
+  
+    peerConnections.current[userId] = pc; 
+    return pc;
+  };
+
+  const handleOffer = async (offer, sender) => {
+    const pc = setupPeerConnection(sender);
+    await pc.setRemoteDescription(new RTCSessionDescription(offer));
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+    webSocketService.sendMessage({ type: "answer", answer, target: sender });
+  };
+  
+  const handleAnswer = async (answer, sender) => {
+    const pc = peerConnections.current[sender];
+    if (pc) {
+      await pc.setRemoteDescription(new RTCSessionDescription(answer));
     }
   };
 
-  const handleOffer = async (offer) => {
-    await peerConnection.current.setRemoteDescription(new RTCSessionDescription(offer));
-    const answer = await peerConnection.current.createAnswer();
-    await peerConnection.current.setLocalDescription(answer);
-    webSocketService.sendMessage({ type: "answer", answer });
-  };
-
-  const handleAnswer = async (answer) => {
-    await peerConnection.current.setRemoteDescription(new RTCSessionDescription(answer));
-  };
-
-  const handleCandidate = (candidate) => {
-    peerConnection.current.addIceCandidate(new RTCIceCandidate(candidate));
+  const handleCandidate = (candidate, sender) => {
+    const pc = peerConnections.current[sender];
+    if (pc) {
+      pc.addIceCandidate(new RTCIceCandidate(candidate));
+    }
   };
 
     connectWebSocket();
@@ -109,9 +115,8 @@ function App() {
 
     return () => {
       webSocketService.close();
-      if (peerConnection.current) {
-        peerConnection.current.close();
-      }
+      Object.values(peerConnections.current).forEach((pc) => pc.close());
+      peerConnections.current = {}; // Reset all connections
     };
 
   }, [localStream]);
